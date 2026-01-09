@@ -1,0 +1,203 @@
+---
+title: "The report of Writeup project"
+author: "Yang Li"
+date: "1/9/2026"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=TRUE)
+```
+
+## Introduction
+The objective is to develop a predictive model to forecast the manner in which an exercise was performed, identified by the "class" variable in the training dataset.
+The report should detail:
+
+1. The methodology used to build the model.
+
+2. The application of cross-validation techniques.
+
+3. The estimation of the expected out-of-sample error.
+
+4. A justification for all modeling decisions made.
+
+5. The use of the final model to predict 20 distinct test cases.
+
+## Data exploration and preparation
+The following preparation of the data are done.
+0. Load data
+```{r echo=TRUE}
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(lattice)
+
+training_orig <- read.csv("pml-training.csv")
+predicting_orig <- read.csv("pml-testing.csv")
+```
+
+1. Remove the features, which the procentage of their values "NA" exceed threshold.
+```{r echo=TRUE}
+is_majority_na <- function(col, threshold = 0.7) {
+  nr_prop = sum(is.na(col)) / length(col)
+  if (nr_prop > threshold) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+get_cols_to_remove <- function(dataframe, threshold = 0.7) {
+  result_bool <- sapply(dataframe, is_majority_na, threshold = threshold)
+  cols <- names(result_bool[result_bool == TRUE])
+  return(cols)
+}
+
+cols_to_remove <- get_cols_to_remove(training_orig, threshold = 0.7)
+
+training1 <- training_orig %>%
+  select(-all_of(cols_to_remove))
+
+predicting1 <- predicting_orig %>%
+  select(-all_of(cols_to_remove))
+
+```
+2. Remove the features, which the procentage of their values "" exceed threshold.
+```{r echo=TRUE}
+get_cols_with_high_empty_string_prop <- function(dataframe, threshold = 0.7) {
+  empty_prop <- colMeans(dataframe == "")
+  result_bool <- empty_prop > threshold
+  cols_to_remove <- names(result_bool[result_bool == TRUE])
+  return(cols_to_remove)
+}
+
+cols_to_remove <- get_cols_with_high_empty_string_prop(training1, threshold = 0.7)
+
+training2 <- training1 %>%
+  select(-all_of(cols_to_remove))
+
+predicting2 <- predicting1 %>%
+  select(-all_of(cols_to_remove))
+```
+
+3. manuall remove features
+```{r echo=TRUE}
+manual_to_remove <- c("user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "X", "new_window", "num_window")
+training3 <- training2 %>%
+  select(-all_of(manual_to_remove))
+predicting3 <- predicting2 %>%
+  select(-all_of(manual_to_remove))
+```
+
+4. For some missing values of the filtered features, I will assign the average value from the same feature
+
+```{r echo=TRUE}
+impute_with_mean <- function(col) {
+  avg_value <- mean(col, na.rm = TRUE)
+  
+  col[is.na(col)] <- avg_value
+  
+  return(col)
+}
+training <- training3 %>%
+  mutate_if(is.numeric, impute_with_mean)
+predicting <- predicting3 %>%
+  mutate_if(is.numeric, impute_with_mean)
+
+training$classe <- as.factor(training$classe)
+predicting$problem_id <- as.factor(predicting$problem_id)
+
+```
+
+3. Divide the training set to training and testing set
+```{r echo=TRUE}
+inTrain = createDataPartition(training$classe, p=0.7, , list=FALSE)
+training = training[ inTrain,]
+testing = training[-inTrain,]
+```
+
+## Model building
+I choose decision tree based approach because of the following reasons:
+
+1. Classification Task: The target variable (classe) is categorical (A, B, C, D, E). The decision tree method is a classification algorithm designed to predict these categories accurately. Multivariate regression is used for continuous, numerical outcomes.
+
+2. High Dimensionality: The dataset has hundreds of features. The decision tree method, such as Random Forest, handles high-dimensional data robustly, naturally dealing with feature selection and overfitting. 
+
+3. Performance: In practice, Random Forest consistently achieves higher accuracy (often near 100%) on this specific dataset compared to regression-based approaches.
+
+I prepare cross validation. I use standard k-folder cross validation, where k is 5 and it repeats only once because of restriction of running time.
+```{r echo=TRUE}
+set.seed(1000)
+control_params <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 1
+)
+```
+
+I use the "Recursive Partitioning and Regression Trees" (rpart) method to train the data
+```{r echo=TRUE}
+modFit_rpart <- train(
+  classe ~ ., 
+  data = training, 
+  method = "rpart",      
+  trControl = control_params
+)
+print(modFit_rpart)
+res_rpart <- predict(modFit_rpart, newdata=testing)
+conf_matrix <- confusionMatrix(res_rpart, testing$classe)
+res <- conf_matrix$overall['Accuracy']
+cat("\nAccuracy:\n")
+cat(res, "\n")
+cat("\nOut of sample error:\n")
+cat(1 - res, "\n")
+```
+
+I use the "Randam Forest" (rf) method to train the data
+```{r echo=TRUE}
+modFit_rf <- train(
+  classe ~ ., 
+  data = training, 
+  method = "rf",      
+  trControl = control_params
+)
+print(modFit_rf)
+res_rf <- predict(modFit_rf, newdata=testing)
+conf_matrix <- confusionMatrix(res_rf, testing$classe)
+res <- conf_matrix$overall['Accuracy']
+cat("\nAccuracy:\n")
+cat(res, "\n")
+cat("\nOut of sample error:\n")
+cat(1 - res, "\n")
+```
+
+I use the "Gradient Boosting Machine" (gbm) method to train the data
+```{r echo=TRUE}
+modFit_gbm <- train(
+  classe ~ ., 
+  data = training,
+  method = "gbm",     
+  trControl = control_params,
+  verbose = FALSE 
+)
+print(modFit_gbm)
+res_gbm <- predict(modFit_gbm, newdata=testing)
+conf_matrix <- confusionMatrix(res_gbm, testing$classe)
+res <- conf_matrix$overall['Accuracy']
+cat("\nAccuracy:\n")
+cat(res, "\n")
+cat("\nOut of sample error:\n")
+cat(1 - res, "\n")
+```
+According to the comparison of above 3 models, one can see that random forest method deliver the best results, following by the "gbm". The "rpart" method gives the worst results.
+
+## Prediction:
+I use the "random forest" method to predict the new test cases in "pml-training.cvs".
+```{r echo=TRUE}
+res <- predict(modFit_rf, newdata=predicting)
+print("\nPredicted results:\n")
+print(res)
+```
+
