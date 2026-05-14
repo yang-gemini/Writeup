@@ -43,9 +43,60 @@ plot(mod1_sim)
 gelman.diag(mod1_sim)
 autocorr.diag(mod1_sim)
 effectiveSize(mod1_sim)
-dic_mod1 <- dic.samples(model = mod1, 
-                        n.iter = 5000, 
-                        type = "pD")
+dic1 = dic.samples(mod1, n.iter=1e3)
 
 # Ergebnis anzeigen
 print(dic_mod1)
+
+X = model.matrix( ~ wool + tension, data=warpbreaks)
+head(X)
+# Modell 2: Lineare Regression mit Wolle und Tension
+mod2_string = " model {
+    for( i in 1:length(y)) {
+        # Hier nutzen wir tensGrp[i], um die passende Präzision zu wählen
+        y[i] ~ dnorm(mu[i], prec[tensGrp[i]])
+        
+        mu[i] <- int + alpha*isWoolB[i] + beta[1]*isTensionM[i] + beta[2]*isTensionH[i]
+    }
+    
+    # Prioren für die Regressionskoeffizienten
+    int ~ dnorm(0.0, 1.0/1.0e6)
+    alpha ~ dnorm(0.0, 1.0/1.0e6)
+    for (j in 1:2) {
+        beta[j] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    # Separate Präzisionen für die 3 Tension-Stufen
+    for (k in 1:3) {
+        prec[k] ~ dgamma(0.5, 0.5)
+        sig[k] <- sqrt(1.0 / prec[k])
+    }
+} "
+
+# Daten für Modell 2 (X wurde bereits über model.matrix erstellt)
+data2_jags = list(
+  y = log(warpbreaks$breaks), 
+  isWoolB = X[,"woolB"], 
+  isTensionM = X[,"tensionM"], 
+  isTensionH = X[,"tensionH"],
+  tensGrp = as.numeric(warpbreaks$tension) # WICHTIG: Der Index für die Gruppen
+)
+
+params2 = c("int", "alpha", "beta", "sig")
+
+# Modell 2 initialisieren und samples ziehen
+mod2 = jags.model(textConnection(mod2_string), data=data2_jags, n.chains=3)
+update(mod2, 1e3)
+mod2_sim = coda.samples(model=mod2, variable.names=params2, n.iter=5e3)
+
+# DIC für beide Modelle berechnen
+dic1 = dic.samples(mod1, n.iter=2000)
+dic2 = dic.samples(mod2, n.iter=2000)
+
+# Ergebnisse anzeigen
+print(dic1)
+print(dic2)
+
+# Direkter Vergleich (Modell mit niedrigerem DIC gewinnt)
+diff_dic <- dic1 - dic2
+print(diff_dic)
