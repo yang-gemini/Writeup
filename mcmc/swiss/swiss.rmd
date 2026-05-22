@@ -1,0 +1,300 @@
+---
+title: "Baysian linear regression with dataset swiss"
+author: "Yang Li"
+format: pdf
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor: visual
+---
+
+## Understand the problem
+
+The `swiss` dataset is a classic benchmarking dataset built into R. It contains socioeconomic indicators and fertility rates for 47 French-speaking provinces (districts) of Switzerland around the year 1888. At this time, Switzerland was undergoing a massive demographic transition.
+
+The primary objective when working with the `swiss` dataset is to model and predict the Fertility Rate of a province based on its socioeconomic characteristics.
+
+## Plan and properly collect relevant data
+
+The following graph provides an overview of the data.
+
+```{r}
+head(swiss)
+```
+
+Since all variables are of integer type, we can construct a linear regression model using this dataset.
+
+```{r}
+str(swiss)
+```
+
+Because most algorithms (e.g., linear regression or neural networks) cannot perform calculations with empty cells and R usually aborts the training process with an error message if `NA` values are present in the dataset, we need to check if there are any NULL values in the dataset and fix them accordingly
+
+```{r}
+any(is.na(swiss))
+```
+FALSE means no NULL values. 
+
+## Explore data
+
+The next step is to check the correlation between variables. Optically, we can see the variables Agriculture, Examination and Education are correlated.
+```{r}
+pairs(swiss)
+```
+
+This is confirmed by the correlation matrix. However, since all absolute correlation coefficients remain below 0.7, we will estimate two different models—both including and excluding the correlated variables—to compare their performance.
+```{r}
+cor_matrix <- cor(swiss[, -1])
+round(cor_matrix, 3)
+```
+## Postulate, Fit and Check Models
+### The hierarchical specification of the model
+
+The hierarchical baysian model is structured in four levels:
+
+Parameter Level (Priors):
+
+Prior distributions are specified for the model parameters (intercept, coefficients, and precision).
+
+Process Level (Linear Predictor):
+
+The linear predictor (expected value) is computed as a linear combination of predictors.
+
+Data Level (Likelihood & Observations):
+
+Observed data are assumed to be normally distributed around the expected value, with a precision parameter.
+
+Transformed Parameters:
+
+Derived quantities, such as the standard deviation, are calculated from the model parameters.
+
+This hierarchical specification allows uncertainty to be propagated from the parameters through the process to the data, enabling full probabilistic inference.
+
+### Choice of Priors
+
+To conduct the Bayesian linear regression, we specified diffuse, non-informative normal priors for both the intercept and the regression coefficients. This choice ensures that parameter estimation is driven solely by the empirical data without introducing subjective bias. 
+
+For the error structure, a conjugate weakly-informative Gamma distribution was assigned to the precision parameter. This effectively bounds the residual variance to positive values while maintaining maximum flexibility for the estimation of the model's residual standard deviation.
+
+The normal distribution is centered at a mean of 0, but features an extremely low precision. This prior exerts virtually no influence or shrinking effect on the parameters. Consequently, the posterior distributions of the coefficients are driven almost entirely by the empirical evidence in the data (the likelihood). The resulting estimates are mathematically equivalent to a classical Maximum Likelihood Estimation, while still providing the full benefits of Bayesian uncertainty quantification
+
+In JAGS, the residual error must be modeled via the precision parameter. A Gamma distribution is the mathematically "natural" (conjugate) prior choice for the precision of a normally distributed variable.
+
+The shape parameter below 1 places higher density near zero (allowing for larger variances) while creating extremely heavy, flat tails to the right.
+
+The Rate/Scale parameter prevents the precision from dropping exactly to zero (which would represent infinite variance and cause the MCMC algorithm to crash).
+
+This prior for residual error restricts the error term to mathematically valid, positive values while remaining flexible enough to let the data determine the true residual standard deviation (sig) without numerical instability.
+
+### Model 1 
+
+The model was fitted using the full set of variables.
+
+```{r}
+library("rjags")
+nr_iteration = 100000
+mod_string1 = " model {
+    for (i in 1:length(Fertility)) {
+        Fertility[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*Agriculture[i] + b[2]*Examination[i] + b[3]*Education[i] + b[4]*Catholic[i] + b[5]*Infant.Mortality[i]
+        res[i] <- Fertility[i] - mu[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:5) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = list(
+  Fertility = swiss$Fertility, 
+  Agriculture = swiss$Agriculture,
+  Examination = swiss$Examination,
+  Education = swiss$Education,
+  Catholic = swiss$Catholic,
+  Infant.Mortality = swiss$Infant.Mortality
+)
+
+set.seed(72)
+
+params = c("b0", "b", "sig", "res")
+
+inits = function() {
+  inits = list("b0" = rnorm(1, 0.0, 100.0),
+               "b"=rnorm(5, 0.0, 100.0), 
+               "prec"=rgamma(1, 1.0, 1.0))
+}
+
+mod1 = jags.model(textConnection(mod_string1), data=data_jags, inits=inits, n.chains=3)
+update(mod1, 1000) # burn-in
+
+mod1_sim = coda.samples(model=mod1,
+                        variable.names=params,
+                        n.iter=nr_iteration)
+
+mod1_csim = do.call(rbind, mod1_sim)
+plot(mod1_sim[, c("b0", "b[1]", "b[2]")])
+plot(mod1_sim[, c("b[3]", "b[4]")])
+plot(mod1_sim[, c("b[5]", "sig")])
+```
+
+### Evaluation of Model 1
+
+Gelman Diagnostics:
+
+When running the diagnostic in R (gelman.diag()), we receive a numerical value (Point Estimate) for each estimated parameter. It shows that the Markov chains have successfully mixed and reached the same distribution. The values are between 1.00 to 1.03 indicates it is optimal. The parameter estimates are stable, representative, and ready for analysis.
+```{r}
+gelman.diag(mod1_sim[, c("b0", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]")], multivariate = FALSE)
+```
+
+Effective size:
+
+An average effective sample size of over 1,000 indicates a minor degree of autocorrelation; however, this remains well within the acceptable threshold for subsequent data analysis.
+
+```{r}
+effectiveSize(mod1_sim[, c("b0", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]")])
+```
+
+Auto correlation plot:
+
+The plot reveals a minor degree of autocorrelation within the MCMC chains. To save space, only the autocorrelation plot from the first chain is displayed. To account for this autocorrelation, the Markov Chain was run for 100,000 iterations.
+```{r}
+autocorr.plot(mod1_sim[[1]][, c("b0", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]")])
+
+```
+
+Residual Plot:
+
+The residual plot shows no discernible patterns.
+
+```{r}
+res_cols <- grep("res", colnames(mod1_csim), value = TRUE)
+mean_residual <- colMeans(mod1_csim[, res_cols])
+plot(mean_residual, 
+     main = "Residualplot (Bayesian)", 
+     ylab = "Residual", 
+     xlab = "Index", 
+     pch = 19, col = "darkblue")
+abline(h = 0, col = "red", lwd = 2)
+```
+
+## Model 2
+```{r}
+mod2 <- lm(Fertility ~ Agriculture + Examination + Education + 
+                    Catholic + Infant.Mortality, data = swiss)
+```
+
+### Comparison between Bayesian and Frequentist Linear Regression
+
+
+```{r}
+summary(mod1_csim[, c("b0", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]")])
+summary(mod2)$coefficients
+```
+
+To validate the robustness of the estimated parameters, the results of the Bayesian 
+linear regression (estimated via JAGS with diffuse priors) were compared against 
+a classical Frequentist Ordinary Least Squares (OLS) regression. 
+
+The table below summarizes the alignment between the posterior means of the 
+Bayesian model (`mod1_csim`) and the point estimates of the classical model (`mod2`):
+
+* **Intercept ($b_0$):** Bayesian Mean = 67.54 vs. OLS Estimate = 66.92
+* **Agriculture ($b_1$):** Bayesian Mean = -0.1754 vs. OLS Estimate = -0.1721
+* **Examination ($b_2$):** Bayesian Mean = -0.2667 vs. OLS Estimate = -0.2580
+* **Education ($b_3$):** Bayesian Mean = -0.8726 vs. OLS Estimate = -0.8709
+* **Catholic ($b_4$):** Bayesian Mean = 0.1038 vs. OLS Estimate = 0.1041
+* **Infant Mortality ($b_5$):** Bayesian Mean = 1.0634 vs. OLS Estimate = 1.0770
+
+#### Key Findings and Interpretation
+
+1. **Parameter Convergence:** 
+The numerical estimates between both paradigms are nearly identical. This close 
+alignment empirically confirms that the non-informative priors ($\mathcal{N}(0, 10^6)$) 
+assigned in the JAGS framework did not introduce subjective bias, leaving the 
+likelihood of the empirical data to completely dominate the posterior distributions.
+
+2. **Significance and Uncertainty:** 
+Both frameworks agree on the importance of the predictors. The variables *Education*, 
+*Catholic*, *Infant.Mortality*, and *Agriculture* are statistically significant. 
+For instance, a higher proportion of education ($b_3$) consistently shows a strong 
+negative impact on fertility, with the middle 50% of the MCMC samples (IQR) ranging 
+from -1.0334 to -0.7117, matching the OLS standard error of 0.1830. Conversely, 
+the effect of *Examination* ($b_2$) crosses zero in both models (Maximum MCMC = 1.32, 
+OLS $p$-value = 0.315), indicating a non-significant relationship.
+
+3. **Conceptual Distinction:** 
+While the numerical outputs are unified, their interpretation fundamentally differs. 
+The OLS model assumes fixed parameters and derives error margins based on hypothetical 
+infinite resampling. In contrast, the Bayesian framework treats the coefficients 
+as random variables, allowing the MCMC quantiles to directly quantify our actual 
+state of knowledge regarding the historical Swiss demographics.
+
+
+## Predict using the model
+
+We used this model to predict the data, subsequently plotting both the posterior predictive and prior predictive distributions.
+```{r}
+matrix_samples <- as.matrix(mod1_sim)
+
+p_coeffs <- matrix_samples[, c("b0", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]")]
+p_sigma  <- 1.0 / sqrt(matrix_samples[, "sig"])
+new_dat  <- matrix(c(1, 40, 16, 9, 60, 22.2), nrow = 6, ncol = 1)
+y_post_dist <- p_coeffs %*% new_dat
+
+y_pred <- rnorm(n = length(y_post_dist), mean = y_post_dist, sd = p_sigma)
+v_min <- min(c(y_post_dist, y_pred))
+v_max <- max(c(y_post_dist, y_pred))
+par(mfrow = c(1, 2))
+
+hist(y_post_dist, main = "Posterior prediction distribution", 
+     xlab = "y_mean", col = "lightblue", xlim = c(v_min, v_max))
+
+hist(y_pred, main = "Prediction distribution", 
+     xlab = "y_predict", col = "lightgreen", xlim = c(v_min, v_max))
+
+```
+
+We observed that the posterior predictive distribution is nearly identical to the prior prediction distribution, because the model's standard deviation is very small.
+
+```{r}
+sd(y_post_dist)
+sd(y_pred)
+
+mean(p_sigma)
+```
+
+## Executive Summary
+
+**Objective & Methodology**
+This analysis investigates the demographic drivers of fertility rates across 47 Swiss provinces 
+using a comparative statistical approach. A Bayesian linear regression model (estimated via 
+Markov Chain Monte Carlo [MCMC] simulation in JAGS) was benchmarked against a classical 
+Frequentist Ordinary Least Squares (OLS) regression model to ensure maximum robustness of 
+the empirical findings.
+
+**Key Findings**
+*   **Methodological Alignment:** The posterior means derived from the Bayesian framework 
+    perfectly mirror the point estimates from the classical OLS model (e.g., Education: 
+    Bayesian Mean = -0.8726 vs. OLS Estimate = -0.8709). This near-identical convergence 
+    confirms that the uninformative priors applied in JAGS did not introduce bias, allowing the 
+    empirical data to completely dominate the results.
+*   **Primary Drivers of Fertility:** Education beyond primary school emerged as the strongest 
+    inhibitor of fertility ($b_3 \approx -0.87$). Conversely, a higher proportion of infant mortality 
+    ($b_5 \approx 1.07$) and a high percentage of Catholic population ($b_4 \approx 0.10$) significantly 
+    elevated fertility rates. Agriculture ($b_1 \approx -0.17$) showed a weak but statistically stable 
+    negative effect.
+*   **Non-Significant Predictors:** The draftee examination scores ($b_2 \approx -0.26$, OLS $p = 0.315$) 
+    crossed zero in both frameworks, indicating no meaningful statistical relationship with fertility 
+    when controlling for other socioeconomic factors.
+
+**Conclusion**
+Both paradigms independently validate that socio-educational advancement (education) and health 
+security (lower infant mortality) are the most powerful structural levers reducing fertility rates. 
+The high model fit (OLS $R^2 = 70.67\%$) indicates that the selected indicators provide a comprehensive 
+and highly reliable explanation of the demographic dynamics within the observed historical cohort.
