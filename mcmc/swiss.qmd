@@ -1,0 +1,220 @@
+---
+title: "Baysian linear regression with dataset swiss"
+author: "Yang Li"
+format: pdf
+editor: visual
+---
+
+## Understand the problem
+
+The `swiss` dataset is a classic benchmarking dataset built into R. It contains socioeconomic indicators and fertility rates for **47 French-speaking provinces** (districts) of Switzerland around the year **1888**. At this time, Switzerland was undergoing a massive demographic transition.
+
+The primary objective when working with the `swiss` dataset is **to model and predict the Fertility Rate** of a province based on its socioeconomic characteristics.
+
+## Plan and properly collect relevant data
+
+The following graph shows us a overlook of the data:
+
+```{r}
+head(swiss)
+```
+
+We can see all data type are integer and we can build a linear regression model to the data.
+
+```{r}
+#| echo: false
+str(swiss)
+```
+
+Because most algorithms (e.g., linear regression or neural networks) cannot perform calculations with empty cells and R usually aborts the training process with an error message if `NA` values are present in the dataset, we need to check if there are any NULL values in the dataset and fix them accordingly
+
+```{r}
+any(is.na(df))
+```
+
+FALSE means no NULL values. \## Explore data The next step is to check the correlation between variables. Optically, we can see the variables Agriculture, Examination and Education are correlated.
+
+```{r}
+pairs(swiss)
+```
+
+This is confirmed with the correlation matrix, but the absolute values in the correlation matrix are still below the 0.7, so we will build 3 models with including the correlated variable and excluding the correlated models and compare the quality of them.
+
+```{r}
+cor_matrix <- cor(swiss[, -1])
+round(cor_matrix, 3)
+```
+
+## Postulate, Fit and Check Models
+
+### Model 1
+
+A model built with all variables
+
+```{r}
+#| fig-width: 9
+#| fig-height: 4
+
+library("rjags")
+mod_string1 = " model {
+    for (i in 1:length(Fertility)) {
+        Fertility[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*Agriculture[i] + b[2]*Examination[i] + b[3]*Education[i] + b[4]*Catholic[i] + b[5]*Infant.Mortality[i]
+        res[i] <- Fertility[i] - mu[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:5) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = list(
+  Fertility = swiss$Fertility, 
+  Agriculture = swiss$Agriculture,
+  Examination = swiss$Examination,
+  Education = swiss$Education,
+  Catholic = swiss$Catholic,
+  Infant.Mortality = swiss$Infant.Mortality
+)
+
+set.seed(72)
+
+params = c("b0", "b", "sig", "res")
+
+inits = function() {
+  inits = list("b0" = rnorm(1, 0.0, 100.0),
+               "b"=rnorm(5, 0.0, 100.0), 
+               "prec"=rgamma(1, 1.0, 1.0))
+}
+
+mod1 = jags.model(textConnection(mod_string1), data=data_jags, inits=inits, n.chains=3)
+update(mod1, 1000) # burn-in
+
+mod1_sim = coda.samples(model=mod1,
+                        variable.names=params,
+                        n.iter=10000)
+
+mod1_csim = do.call(rbind, mod1_sim)
+plot(mod1_sim[, c("b0", "b[1]")])
+plot(mod1_sim[, c("b[2]", "b[3]")])
+plot(mod1_sim[, c("b[4]", "b[5]")])
+plot(mod1_sim[, c("sig")])
+```
+
+In the following show the auto correlation graph, residual graph and Deviance Information Criterion (DIC). Auto correlation plot:
+
+```{r}
+autocorr.plot(mod1_sim)
+
+```
+
+Residual Plot
+
+```{r}
+autocorr.plot(mod1_sim)
+res_cols <- grep("res", colnames(mod1_csim), value = TRUE)
+mean_residual <- colMeans(mod1_csim[, res_cols])
+plot(mean_residual, 
+     main = "Residualplot (Bayesian)", 
+     ylab = "Residual", 
+     xlab = "Index", 
+     pch = 19, col = "darkblue")
+abline(h = 0, col = "red", lwd = 2)
+```
+
+DIC
+
+```{r}
+dic_result1 = dic.samples(mod1, n.iter=10000)
+print(dic_result1)
+
+```
+
+### Model 2
+
+A model built without examination
+
+```{r}
+#| fig-width: 9
+#| fig-height: 4
+
+library("rjags")
+mod_string2 = " model {
+    for (i in 1:length(Fertility)) {
+        Fertility[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*Agriculture[i] + b[2]*Education[i] + b[3]*Catholic[i] + b[4]*Infant.Mortality[i]
+        res[i] <- Fertility[i] - mu[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:4) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = list(
+  Fertility = swiss$Fertility, 
+  Agriculture = swiss$Agriculture,
+  Education = swiss$Education,
+  Catholic = swiss$Catholic,
+  Infant.Mortality = swiss$Infant.Mortality
+)
+
+set.seed(72)
+
+inits = function() {
+  inits = list("b0" = rnorm(1, 0.0, 100.0),
+               "b"=rnorm(4, 0.0, 100.0), 
+               "prec"=rgamma(1, 1.0, 1.0))
+}
+
+mod2 = jags.model(textConnection(mod_string2), data=data_jags, inits=inits, n.chains=3)
+update(mod2, 1000) # burn-in
+
+mod2_sim = coda.samples(model=mod2,
+                        variable.names=params,
+                        n.iter=10000)
+
+mod2_csim = do.call(rbind, mod2_sim)
+plot(mod2_sim[, c("b0", "b[1]")])
+plot(mod2_sim[, c("b[2]", "b[3]")])
+plot(mod2_sim[, c("b[4]", "sig")])
+```
+
+In the following show the auto correlation graph, residual graph and Deviance Information Criterion (DIC). Auto correlation plot:
+
+```{r}
+autocorr.plot(mod2_sim)
+
+```
+
+Residual Plot
+
+```{r}
+autocorr.plot(mod2_sim)
+res_cols <- grep("res", colnames(mod2_csim), value = TRUE)
+mean_residual <- colMeans(mod2_csim[, res_cols])
+plot(mean_residual, 
+     main = "Residualplot (Bayesian)", 
+     ylab = "Residual", 
+     xlab = "Index", 
+     pch = 19, col = "darkblue")
+abline(h = 0, col = "red", lwd = 2)
+```
+
+DIC
+
+```{r}
+dic_result2 = dic.samples(mod2, n.iter=10000)
+print(dic_result2)
+
+```
