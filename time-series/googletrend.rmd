@@ -9,24 +9,36 @@ editor: visual
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, 
+                      out.height = "30%",
+                      fig.align = "center")
 ```
+## Executive Summary
+### Project Overview
+This report analyzes global Google Trends search data for the phrase "time series" spanning from 2004 to the present. The primary goal is to strip away unpredictable data noise to uncover the true long-term growth trend and recurring seasonal patterns driving interest in this topic.
 
-## Understanding the problem
+### The Challenge
+Analyzing real-world internet search data introduces unique difficulties:  
 
-### Objective
+Constant Evolution: Search volume changes dramatically over long periods, meaning standard static models cannot accurately track it.  
 
-The goal of this analysis is to model and understand the underlying structural dynamics of global Google Trends search interest for the keyword "time series" from 2004 to the present.
+Hidden Cycles: Search behavior fluctuates based on annual cycles (such as the start of academic semesters), which must be separated from general growth.  
 
-### Key Challenges
+Unpredictable Volatility: The consistency of search volume changes over time, creating a risk of unreliable future predictions if not properly managed.  
 
-Non-Stationarity: The raw search volume data exhibits a strong, long-term global trend, making it non-stationary and unsuitable for standard stationary time series models.
+### Our Approach
 
-Seasonality-Effecte: The data contains a distinct annual (12-month) seasonal pattern that needs to be isolated
+To address these challenges, we built an adaptive state-space forecasting model (a Normal Dynamic Linear Model with unknown variance). This mathematical framework breaks the raw data down into distinct, readable layers: a moving baseline trend and a mathematical wave representing a 12-month calendar cycle. To ensure the model remains highly responsive to recent internet shifts, we implemented an optimized "discount factor" that dynamically prioritizes recent data while systematically accounting for unknown shifts in volatility.  
 
-Unknown Variance: Real-world search data experiences changing fluctuations over time (heteroscedasticity). Therefore, the model must account for an unknown observation variance to ensure reliable and robust interval estimation.
+### Key Results
 
-Methodology:To address these challenges, a Normal Dynamic Linear Model (NDLM) with unknown variance is constructed. The model decomposes the raw time series directly by combining a polynomial trend component (local level) with a trigonometric seasonal component ($q=1$ harmonic). An baysian based filter and smoother are applied, utilizing an optimized discount factor to dynamically track structural changes.
+Dynamic Adaptation: The model identified a high adaptation rate (discount factor of 0.7) as optimal, proving that search behavior on this topic responds heavily to recent structural shifts rather than just historical averages.  
+
+Trend Isolation: The framework successfully separated background data noise from a massive, exponential spike in search interest that began climbing rapidly after 2025.  
+
+Seasonal Clarity: The model successfully isolated a highly predictable 12-month cyclical pattern, confirming that public interest peaks and valleys at the same times every year.  
+
+Reliable Safeguards: By allowing the model to adapt to unknown variances, the resulting 95% prediction intervals naturally widen during volatile periods, offering realistic boundaries for future expectations rather than overconfident guesses. 
 
 ## Data exploration
 
@@ -105,26 +117,20 @@ ci_smoothed <- get_credible_interval_unknown_v(results_smoothed$fnt, results_smo
 )
 ```
 
-### Plot of linear trend components
-
 This script configures the graphical layout and generates two separate time series plots to analyze Google Trends data alongside smoothed trend estimates.
 
 ```{r}
 index = timeseries_data$date
-par(mfrow=c(1,1))
 plot(index, data$yt, pch=19, cex=0.3, col='lightgray', 
      xlab="time", ylab="Google hits", main="Trend Level & Distributions")
 lines(index, results_smoothed$mnt[,1], lwd=2, col='magenta')
 lines(index, results_filtered$mt[,1], lwd=1.5, col='blue')
 lines(index, ci_filtered[, 1], lty=3, col='blue', lwd=1)
 lines(index, ci_filtered[, 2], lty=3, col='blue', lwd=1)
-par(mfrow=c(1,1))
 plot(index, results_smoothed$mnt[,2], col='darkblue', lwd=2, type='l', 
      ylim=c(-0.6, 0.6), xlab="time", ylab="rate of change", main="Slope Component")
 abline(h=0, col='red', lty=2)
-par(mfrow=c(1,1))
 ```
-### Plot of seasonal components
 
 This code generates a line plot to visualize a seasonal or cyclical component—specifically with a period of 12 (likely representing monthly patterns)—extracted from the smoothed time series results.
 
@@ -171,9 +177,10 @@ polygon(c(1:5, 5:1), c(upper_bound, rev(lower_bound)), col = rgb(1, 0, 0, 0.1), 
 legend("topleft", legend = c("Point Forecast (Distribution Mean)", "95% Confidence Space (Distribution Width)"), 
        col = c("blue", "red"), lty = c(1, 2), pch = c(19, NA), bty = "n")
 ```  
-### Summary of Results
 
-The analysis successfully specified and evaluated an adaptive Bayesian Dynamic Linear Model for the "time series" Google Trends dataset.
+## Conclusion
+
+The analysis demonstrates that global interest in "time series" is undergoing aggressive, exponential growth while remaining anchored to highly predictable annual cycles. Because this framework successfully mirrors real-world volatility and adjusts to sudden shifts, it provides an exceptionally reliable foundation for generating strategic, long-term forecasts.
 
 ### Key Findings
 
@@ -184,7 +191,3 @@ Trend Extraction: The model successfully decoupled the underlying long-term grow
 Seasonal Decomposition: The trigonometric seasonal component ($q=1$) effectively isolated the steady 12-month cyclical behavior (annual peaks and troughs) hidden within the raw data.
 
 Uncertainty Quantification: By implementing a DLM with unknown variance, the model provided robust 95% credible intervals that accurately reflect the estimation uncertainty over the entire timeline.
-
-### Final Takeaway:
-
-The structural decomposition demonstrates that interest in "time series" is not only growing exponentially in recent years but is heavily driven by predictable annual cycles. This adaptive state-space framework provides a solid foundation for generating reliable future out-of-sample forecasts.
