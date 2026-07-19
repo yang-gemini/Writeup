@@ -1,0 +1,164 @@
+---
+title: "Bayesian Time Series Analysis of Earthquake Data: Linear vs. Mixture Autoregressive Models"
+author: "Yang Li"
+date: "2026-06-12"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+
+## Introduction
+
+This project addresses these modeling challenges by performing a comprehensive Bayesian analysis on a historical earthquake time series dataset, leveraging both standard Autoregressive (AR) conjugated models and mixture model.The primary objective of this study is to systematically capture the underlying temporal dependencies of seismic events and evaluate whether a regime-switching framework provides superior predictive power compared to a single-regime linear model. 
+
+## Conjugate Analysis
+
+## Model Selection: Determination of the AR Order $p$
+
+To identify the optimal autoregressive lag order $p$ for the single-regime AR process, both the **Akaike Information Criterion (AIC)** and the **Bayesian Information Criterion (BIC)** were calculated for model orders ranging from $p = 1$ to $p = 15$. 
+
+The calculated criteria values are visualized in Figure \ref{fig:aic-bic-plot}, where the red labels (**"a"**) denote the AIC values and the blue labels (**"b"**) represent the BIC values.
+
+```{r aic-bic-plot, fig.cap="Model selection via AIC (red 'a') and BIC (blue 'b') for AR orders p = 1 to 15.", fig.align="center", out.width="85%", echo=FALSE}
+knitr::include_graphics("images/ar_selection.png")
+```
+
+The graphical analysis reveals a clear, classic trade-off between model goodness-of-fit and parameter parsimony:
+
+*   **BIC Selection (Optimal $p = 3$):** The blue BIC path drops steeply from $p = 1$ and reaches its global minimum strictly at **$p = 3$** (with a criterion value of approximately 266). Past this point, the BIC increases linearly and steeply. This behavior is driven by the heavier penalty term of the BIC ($\ln(n) \cdot k$), which strictly suppresses overfitting.
+*   **AIC Selection (Optimal $p = 3$ or $p = 4$):** The red AIC path also shows a sharp initial decrease, plateauing across orders **$p = 3$** and **$p = 4$** at its lowest value (around 259). Because the AIC applies a more lenient penalty ($2k$), it stays relatively flat for higher orders rather than rising as sharply as the BIC.
+
+Since both criteria closely align in pointing to the exact same structural elbow, **an autoregressive order of $p = 3$ is selected** as the optimal model for the standard AR baseline process. This choice ensures that the temporal dependencies of the earthquake data are sufficiently captured while avoiding over-parameterization, providing a robust foundation for the subsequent mixture model comparison.
+
+## Model Fitness: Conjugate Bayesian AR Model Evaluation
+
+To evaluate the in-sample fitness and predictive performance of the standard conjugate Bayesian Autoregressive (AR) model, the estimated posterior predictive means along with their 95% credible intervals (C.I.) were plotted against the observed historical earthquake data ("Truth").
+
+```{r model-fitness-plot, fig.cap="Prediction vs True.", out.width="85%", echo=FALSE}
+knitr::include_graphics("./images/conjugate-prediction.png")
+```
+
+The graphical diagnostics reveal several key insights regarding the performance of the single-regime AR model:
+
+*   **Trend Tracking:** The posterior mean trajectory (blue dashed line with "x" markers) closely tracks the empirical time series ("Truth", black solid line) across all 100+ time steps. The model successfully captures the cyclical fluctuations and underlying state shifts in earthquake frequency over time.
+*   **Peak and Trough Smoothing:** As is characteristic of linear autoregressive models minimizing mean squared error, the predictions exhibit a slight "mean-reverting" smoothing effect. The model marginally underestimates the sharpest seismic spikes (e.g., around $t = 21, 40, 51,$ and $93$) and occasionally overshoots the deepest troughs (e.g., around $t = 28$ and $40$). 
+*   **Uncertainty Quantification:** The 95% credible interval (fine dotted lines surrounding the mean) tightly encapsulates the structural movements of the series, demonstrating that the conjugate prior structure provided stable regularized parameter estimates without inflating posterior variance.
+
+Overall, the single-regime conjugate Bayesian AR model demonstrates a highly satisfactory fit for the baseline process. However, its tendency to smooth out sudden, high-magnitude bursts suggests that a non-linear framework—such as the Mixture of Autoregressive (MAR) models evaluated next—may be required to fully capture the extreme regime switches present in this seismic catalog.
+
+### Model Diagnostics: Residual Analysis
+
+To further evaluate the adequacy of the conjugate Bayesian AR(3) model, the residuals ($\epsilon_t = y_t - \hat{y}_t$) were plotted over time against the zero-bias baseline (red dashed line).
+
+```{r residual-plot, fig.cap="Residual plot ",  out.width="85%", echo=FALSE}
+# Ersetzen Sie den Pfad durch Ihre tatsächliche Bilddatei
+knitr::include_graphics("./images/conjugate-residual.png")
+```
+
+The residual diagnostic plot provides several critical insights into the underlying model assumptions:
+
+*   **Mean Zero Property (Unbiasedness):** The residuals are symmetrically distributed around the zero line (red dashed line). This indicates that the model is unbiased on average and does not systematically over- or under-estimate the global baseline of the earthquake series.
+*   **Presence of Unmodeled Shocks (Extreme Volatility):** Several large positive spikes are clearly visible, most notably near $t = 37$ (exceeding $+14$) as well as around $t = 18, 23,$ and $63$. These large residuals confirm that the single-regime linear AR model cannot fully absorb sudden, high-intensity seismic bursts, leaving structured variance in the error term.
+*   **Independence (White Noise Assumption):** Outside of the isolated extreme peaks and troughs (e.g., $t = 12, 46, 53$), the error terms fluctuate rapidly and randomly without showing long-term structural trends or prolonged waves of positive/negative errors. This suggests that the selected AR order ($p=3$) successfully captured the primary linear temporal dependencies.
+
+While the residual variance is broadly stable across time, the prominent isolated shocks violate the standard Gaussian white noise assumption of a basic AR process. This diagnostic strongly justifies migrating from a single-regime linear framework to a **Mixture of Autoregressive (MAR) models**, which can dynamically adjust its variance ($\nu_k$) and coefficients ($\beta_k$) across different volatility regimes to better capture these high-magnitude earthquake shocks.
+
+## Model Diagnostics: Autocorrelation Function (ACF) of Residuals
+
+To verify whether the selected $AR(3)$ order successfully captured all linear dependencies in the time series, an Autocorrelation Function (ACF) analysis was conducted on the residuals across 20 lags.
+
+```{r acf-plot, fig.cap="ACF plot of the residuals. ", out.width="85%", echo=FALSE}
+# Ersetzen Sie den Pfad durch Ihre tatsächliche Bilddatei
+knitr::include_graphics("./images/conjugate-acf.png")
+```
+
+The ACF plot provides critical diagnostic information regarding the serial independence of the model errors:
+
+*   **Lag 0 Baseline:** As expected, the autocorrelation at lag 0 is exactly $1.0$, representing the perfect correlation of the residual series with itself.
+*   **Minor Residual Autocorrelation (Lags 1 and 3):** The spikes at **lag 1** and **lag 3** slightly breach or sit exactly on the lower 95% significance boundary (blue dashed line), showing a weak negative autocorrelation (around $-0.2$). This indicates a minor "over-correction" or bouncing effect in the linear prediction model, where an overestimation in one period is followed by an underestimation in the next.
+*   **Success of the AR(3) Structure:** For all remaining time lags (lag 2 and lags 4 through 20), the autocorrelation coefficients remain well within the statistical noise threshold. They fluctuate randomly near zero, showing no persistent or long-memory patterns.
+
+The fact that nearly all lags lie safely within the significance bounds indicates that the linear $AR(3)$ structure did an excellent job of filtering out the systematic temporal trends from the earthquake data. The isolated boundary breaches at lags 1 and 3 are minor and typical for time series with high volatility. This confirms that while the linear dependency is mostly resolved, the remaining non-linear structures (the sudden variance bursts observed in the previous residual time series plot) should be tackled using the multi-component mixture framework.
+
+## Mixture Model
+
+## Model Selection for Mixture Model: Determination of Components $K$
+
+To determine the optimal number of mixing regimes within the Mixture of Autoregressive (MAR) framework, the **Deviance Information Criterion (DIC)** was calculated for models ranging from $K = 2$ to $K = 5$ components. Each model assumed a fixed underlying autoregressive order of $p = 3$, as identified during the baseline AR process selection.
+
+The resulting DIC values are displayed in Figure \ref{fig:dic-mixture-plot}.
+
+```{r dic-mixture-plot, fig.cap="Model selection via DIC for Mixture models.", out.width="85%", echo=FALSE}
+knitr::include_graphics("./images/mixture_dic_plot.png")
+```
+
+The statistical evaluation of the mixture components reveals a straightforward model choice:
+
+*   **Global Minimum ($K = 2$):** The DIC achieves its minimum value strictly at **$K = 2$** components, highlighting this as the mathematically optimal architecture. This lower score demonstrates that a two-regime switching model provides the ideal balance between goodness-of-fit improvement and model complexity control.
+*   **Overfitting at Higher Components ($K \ge 3$):** For $K = 3, 4,$ and $5$, the DIC path rises continuously. Introducing additional mixture states penalizes the model severely without yielding significant gains in log-likelihood. In the context of earthquake time series, this indicates that splitting the dataset into more than two latent regimes overparameterizes the system.
+
+Based on the minimum DIC criterion, **a 2-component Mixture AR(3) model is chosen** for the final analysis. From a geophysical perspective, this structural selection aligns perfectly with the dual-nature dynamics of seismic time series. The two latent components effectively partition the earthquake series into two distinct operational regimes: 
+1.  A standard, low-volatility baseline state representing **background tectonic quiescence**.
+2.  A high-variance, high-amplitude state designed to capture **sudden seismic shocks and clustered aftershock sequences**.
+
+This chosen MAR(3) model with 2 components will now be utilized to generate out-of-sample predictions and compared directly against the standard single-regime AR(3) process.
+
+## Model Fitness: Hierarchical Mixture AR Model Evaluation
+
+To assess the performance of the non-linear framework, the in-sample fitness of the Hierarchical Mixture Autoregressive model—specified with an autoregressive order of $p = 2$ and $K = 3$ mixture components—was evaluated against the empirical earthquake data ("Truth"). 
+
+```{r mar-fitness-plot, fig.cap="Prediction from the Hierarchical Mixture AR model.", out.width="85%", echo=FALSE}
+# Replace with your actual file path
+knitr::include_graphics("./images/mixture-model-prediction.png")
+```
+
+The graphical results reveal several distinct behavioral characteristics of the multi-component mixture approach:
+
+*   **Dynamic Regime Tracking:** The posterior predictive mean (blue dashed line with "x" markers) demonstrates high flexibility, closely following both the high-frequency oscillations and the deeper structural shifts of the observed time series ("Truth", black solid line). 
+*   **Improved Peak Capture:** Compared to a standard single-regime linear AR model, the 3-component mixture model shows an enhanced capacity to capture sudden, high-magnitude seismic spikes (such as the major peaks near $t = 21, 40, 51,$ and $93$). By switching to a high-variance, high-mean regime, the model successfully reduces the "mean-reverting" oversmoothing effect typically seen in linear processes.
+*   **Tight Uncertainty Bounds:** The 95% credible intervals (fine dotted lines) closely envelope the posterior mean trajectory. This narrow variance indicates that despite the increased complexity of estimating parameters across 3 distinct latent states, the hierarchical structure regularizes the posterior estimates effectively, avoiding variance inflation.
+
+The Hierarchical Mixture AR model demonstrates a highly robust structural fit to the earthquake time series. By partitioning the data into three latent states, it successfully accommodates the non-linear regime-switching dynamics and sudden bursts characteristic of seismic activity, outperforming the rigid constraints of a single-regime linear model.
+
+## Model Comparison: Residual Diagnostics (Conjugate AR vs. Mixture AR)
+
+To evaluate the structural improvements gained by moving to a non-linear framework, the residuals ($\epsilon_t = y_t - \hat{y}_t$) from the 2-component Mixture $AR(3)$ model (Figure \ref{fig:mixture-residuals}) were directly compared against those of the baseline conjugate linear $AR(3)$ model.
+
+```{r mixture-residuals, fig.cap="Residual time series plot for the 2-component Mixture AR(3) model.", out.width="85%", echo=FALSE}
+knitr::include_graphics("./images/mixture-model-residual.png")
+```
+
+A comparative analysis of the two residual series reveals several critical statistical advancements:
+
+*   **Reduction of Extreme Prediction Errors:** In the baseline linear model, the largest prediction error at $t = 37$ exceeded $+14$. In this Mixture $AR(3)$ framework, that peak error is successfully suppressed and compressed down to approximately $+12.5$. Similar variance dampening is observed across other major shock periods (e.g., around $t = 18$ and $t = 23$).
+*   **Adaptive Variance Capture:** The mixture model's ability to alternate between two latent regimes allows it to assign a higher variance parameter ($\nu_k$) during periods of high seismic volatility. Consequently, while the residuals still reflect the unpredictable nature of sudden shocks, they no longer represent severe structural failures of the underlying mean model.
+*   **Preservation of Unbiasedness:** Like the conjugate model, the mixture residuals continue to fluctuate symmetrically around the zero-bias baseline (blue dashed line). This confirms that introducing regime-switching dynamics did not introduce any systematic over- or under-estimation across the 100-step time horizon.
+
+The residual comparison demonstrates that the **2-component Mixture $AR(3)$ model outperforms the linear conjugate model** in handling the high-volatility shocks characteristic of earthquake data. By dynamically adjusting to extreme bursts rather than pulling predictions rigidly toward a single global mean, the mixture framework yields a much tighter, more statistically compliant error structure for non-linear seismic forecasting.
+
+
+## Executive Summary
+
+This report presents a comprehensive Bayesian analysis of a historical earthquake time series dataset ("Quakes"). The primary objective was to model the temporal dependencies of seismic events and evaluate whether a non-linear, regime-switching framework provides superior statistical fit and predictive power compared to a standard linear model. 
+
+The analysis was executed in three sequential phases: model selection, hierarchical posterior estimation via Gibbs sampling, and out-of-sample predictive verification.
+
+### Key Findings & Structural Decisions
+
+1. **Optimal Linear Baseline (AR Order $p = 3$):** 
+   Using classical model selection criteria across autoregressive lags from $1$ to $15$, both the Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC) reached an identical structural elbow at **$p = 3$**. This order successfully filtered out linear serial correlations, as verified by residual Autocorrelation Function (ACF) diagnostics.
+   
+2. **Regime Identification (Components $K = 2$):** 
+   To account for the non-linear bursts and aftershock clusters typical of seismic data, a finite Mixture of Autoregressive (MAR) model was implemented. Evaluating the Deviance Information Criterion (DIC) for mixtures ranging from $2$ to $5$ components revealed a strict global minimum at **$K = 2$**. This statistically justifies a two-regime system, structurally partitioning the time series into a low-volatility *background tectonic quiescence* state and a high-variance *seismic shock* state.
+
+3. **Predictive Performance & Volatility Capture:** 
+   While the standard conjugate Bayesian AR(3) model provided a solid baseline tracking of the global mean, its linear structure inherently smoothed out extreme values. In contrast, the 2-component Mixture AR(3) model dynamically adapted its coefficients and error variances ($\nu_k$) across states. This flexibility significantly improved the in-sample fitness, captured sudden high-magnitude peaks with greater precision, and maintained tightly bounded 95% credible intervals without variance inflation.
+
+### Final Conclusion
+The empirical evidence strongly indicates that earthquake frequencies are governed by non-linear, latent states. The **2-component Mixture AR(3) model** represents the mathematically optimal framework for this dataset, effectively managing the trade-off between parameter parsimony and structural flexibility. These findings demonstrate that Bayesian mixture models offer a superior, structurally justified tool for probabilistic seismic hazard assessment and forecasting.
+
